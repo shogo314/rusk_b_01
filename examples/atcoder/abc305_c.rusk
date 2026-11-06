@@ -3,7 +3,7 @@
 in h,w:Int;
 in grid(h):Vec<Str>;
 // Keep the input dimensions unchanged while updating the bounding box.
-let top:=copy(h); let bottom:=0; let left:=copy(w); let right:=0;
+let top = h; let bottom:=0; let left = w; let right:=0;
 for r in 0..h {
     for c in 0..w {
         if grid[r][c]=='#' {

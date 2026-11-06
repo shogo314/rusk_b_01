@@ -1,7 +1,7 @@
 // B - Some Sums
 // https://atcoder.jp/contests/abc083/tasks/abc083_b
 fn digit_sum(n:Int)->Int {
-    let value:=copy(n);
+    let value = n;
     let total:=0;
     while value { total+=value%10; value/=10; }
     return total;

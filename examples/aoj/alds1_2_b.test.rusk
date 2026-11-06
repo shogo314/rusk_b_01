@@ -6,7 +6,7 @@ in n:Int;
 in a(n):Vec<Int>;
 let swaps:=0;
 for i in 0..n {
-    let smallest:=copy(i);
+    let smallest = i;
     for j in i..n { if a[j]<a[smallest] { smallest:=j; } }
     if smallest!=i {
         let held:=a[i]; a[i]:=a[smallest]; a[smallest]:=held;

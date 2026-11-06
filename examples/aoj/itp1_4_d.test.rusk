@@ -4,6 +4,6 @@
 // 集計
 in n:Int;
 in values(n):Vec<Int>;
-let low:=copy(values[0]); let high:=copy(values[0]);
+let low = values[0]; let high = values[0];
 for value in values { low=min(low,value); high=max(high,value); }
 wt low,high,values.sum();

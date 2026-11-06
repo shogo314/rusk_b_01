@@ -14,14 +14,14 @@ s.push_back('!'); wt s;
 let a := [[1,2],[3]]; let row:=a[0]; let old:=row[0];
 for i in 0..1000 { a.push_back([i]); }
 a=[[9]]; row[0]=8; wt old,a;
-let copied:=copy(a); copied[0][0]=10; wt a,copied;
+let copied = a; copied[0][0]=10; wt a,copied;
 ''', b'', b'X\nXYZ!\n8 9\n9 10\n'),
     ('''fn first() -> Char { let s:="abc"; return s[0]; }
 let saved:Vec<Char>:=[];
 for i in 0..200 { saved.push_back(first()); }
 for c in saved { c='Z'; }
 wt saved.len(),saved[0],saved[-1];
-let detached:=copy(saved); saved=[]; wt detached.len();
+let detached = saved; saved=[]; wt detached.len();
 let s:="a";
 while s[0]=='a' { s.push_back('!'); s[0]='b'; continue; }
 for i in 0..3 { let c:=s[0]; if i==1 { break; } continue; }

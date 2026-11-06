@@ -6,7 +6,7 @@ in n,capacity:Int;
 let best:=[0;capacity+1];
 for item in 0..n {
     in value,weight:Int;
-    let remaining:=copy(capacity);
+    let remaining = capacity;
     while remaining>=weight {
         best[remaining]=max(best[remaining],best[remaining-weight]+value);
         remaining-=1;

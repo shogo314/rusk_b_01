@@ -1,7 +1,7 @@
 // B - Longest Palindrome
 // https://atcoder.jp/contests/abc320/tasks/abc320_b
 fn palindrome(s:Str,left:Int,right:Int)->Bool {
-    let l:=copy(left); let r:=copy(right);
+    let l = left; let r = right;
     while l<r {
         if s[l]!=s[r] { return false; }
         l+=1; r-=1;

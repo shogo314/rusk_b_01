@@ -2,11 +2,11 @@
 // Unionfind
 // 経路圧縮とサイズによる併合
 fn leader(parents:Vec<Int>,vertex:Int)->Int {
-    let root:=copy(vertex);
+    let root = vertex;
     while parents[root]>=0 { root=parents[root]; }
-    let current:=copy(vertex);
+    let current = vertex;
     while current!=root {
-        let next:=copy(parents[current]);
+        let next = parents[current];
         parents[current]=root;
         current:=next;
     }

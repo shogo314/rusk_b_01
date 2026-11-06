@@ -2,7 +2,7 @@
 // https://atcoder.jp/contests/abc186/tasks/abc186_c
 // 基数ごとの桁の検査
 fn contains_seven(n:Int,base:Int)->Bool {
-    let value:=copy(n);
+    let value = n;
     while value {
         if value%base==7 { return true; }
         value/=base;

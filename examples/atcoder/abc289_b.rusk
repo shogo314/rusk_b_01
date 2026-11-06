@@ -7,9 +7,9 @@ for x in a { linked[x]=true; }
 let answer:Vec<Int>:=[];
 let start:=1;
 while start<=n {
-    let end:=copy(start);
+    let end = start;
     while end<n && linked[end] { end+=1; }
-    let current:=copy(end);
+    let current = end;
     while current>=start { answer.push_back(copy(current)); current-=1; }
     start=end+1;
 }

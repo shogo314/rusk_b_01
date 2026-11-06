@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, Name, Span, Stmt};
+use crate::ast::{Expr, ExprKind, Initializer, Name, Span, Stmt};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone)]
@@ -497,7 +497,18 @@ impl Compiler {
                 }
                 let value = e
                     .as_ref()
-                    .map(|e| self.expr(e, t.as_ref().map(|n| n.text.as_str())))
+                    .map(|initializer| {
+                        let (e, copied) = match initializer {
+                            Initializer::Shared(e) => (e, false),
+                            Initializer::Copied(e) => (e, true),
+                        };
+                        let value = self.expr(e, t.as_ref().map(|n| n.text.as_str()))?;
+                        if copied {
+                            self.call("copy", vec![value], None, &e.span)
+                        } else {
+                            Ok(value)
+                        }
+                    })
                     .transpose()?;
                 let ty = t
                     .as_ref()

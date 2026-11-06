@@ -58,6 +58,11 @@ pub enum ExprKind {
     Assign(String, Box<Expr>, Box<Expr>),
 }
 #[derive(Clone, Debug)]
+pub enum Initializer {
+    Shared(Expr),
+    Copied(Expr),
+}
+#[derive(Clone, Debug)]
 pub enum Stmt {
     Type(Name, BTreeMap<String, String>),
     Function(
@@ -69,7 +74,7 @@ pub enum Stmt {
     UserFunction(Name, Vec<(Name, Name)>, Option<Name>, Box<Stmt>),
     Return(Span, Option<Expr>),
     Symbol(Name, BTreeMap<String, String>),
-    Let(Name, Option<Name>, Option<Expr>),
+    Let(Name, Option<Name>, Option<Initializer>),
     Input(Vec<(Name, Name, Vec<Expr>)>),
     Output(Vec<Expr>),
     Block(Vec<Stmt>),
@@ -164,7 +169,16 @@ fn stmt(s: &g::Statement<'_>) -> Result<Stmt, String> {
             Stmt::Let(
                 name(&x.identifier),
                 x.let_opt.as_ref().map(|t| type_name(&t.type_name)),
-                x.let_opt0.as_ref().map(|e| expr(&e.expr)).transpose()?,
+                x.let_opt0
+                    .as_ref()
+                    .map(|e| -> Result<Initializer, String> {
+                        let value = expr(&e.expr)?;
+                        Ok(match e.let_init_op.as_ref() {
+                            g::LetInitOp::ColonEqu(_) => Initializer::Shared(value),
+                            g::LetInitOp::Equ(_) => Initializer::Copied(value),
+                        })
+                    })
+                    .transpose()?,
             )
         }
         g::Statement::Input(x) => {

@@ -4,7 +4,7 @@
 in s:Str;
 let answer:="";
 for i in 0..s.len() {
-    let c:=copy(s[-1-i]);
+    let c = s[-1-i];
     if c=='6' { c='9'; }
     else { if c=='9' { c='6'; } }
     answer.push_back(c);

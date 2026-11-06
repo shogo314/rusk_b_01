@@ -1153,3 +1153,113 @@ wt living();
         "0\n1\n0\n1\n0\n0\n0\n0\n",
     );
 }
+
+#[test]
+fn copy_initializers_are_independent_while_shared_initializers_alias() {
+    succeeds(
+        r#"
+let h:=10;
+let top = h;
+let shared := h;
+top=3; shared=20;
+wt h,top,shared;
+let flag:=true; let detached_flag = flag; detached_flag=false;
+let character:='a'; let detached_character = character; detached_character='z';
+let word:="abc"; let detached_word = word; detached_word[0]='X';
+wt flag,detached_flag,character,detached_character,word,detached_word;
+{ let h = h; h=99; wt h; }
+wt h;
+fn first_copy(a:Vec<Int>)->Int { let x = a[0]; x+=1; return x; }
+let values:=[7]; wt first_copy(values),values;
+"#,
+        "",
+        "20 3 20\nYes No a z abc Xbc\n99\n20\n8 7\n",
+    );
+}
+
+#[test]
+fn copy_initializers_preserve_type_context_and_deep_copy_arrays() {
+    succeeds(
+        r#"
+let empty:Vec<Int> = [];
+let rows:Vec<Vec<Int>> = [[];2];
+rows[0].push_back(1); wt empty.len(),rows[0],rows[1].len();
+let x:=1; let original:=[[x,x],[x]];
+let detached:Vec<Vec<Int>> = original;
+detached[0][0]=9; x=2;
+wt original,detached;
+let words = ["a","b"]; let other = words;
+other[0][0]='Z'; wt words,other;
+let flags:Vec<Bool> = []; flags.push_back(true); wt flags;
+"#,
+        "",
+        "0 1 0\n2 2 2 9 1 1\na b Z b\nYes\n",
+    );
+}
+
+#[test]
+fn copy_initializers_evaluate_rhs_once_and_release_character_borrows() {
+    succeeds(
+        r#"
+let count:=0;
+let saved = (count+=1);
+count+=1; wt saved,count;
+let source:=10;
+let result = (source:=20);
+source=30; wt result,source;
+let s:="abc";
+let letter:Char = s[0];
+s.push_back('!'); letter='Z'; wt s,letter;
+let empty:Vec<Int> = [(count+=1);0]; wt count,empty.len();
+"#,
+        "",
+        "1 2\n20 30\nabc! Z\n3 0\n",
+    );
+}
+
+#[test]
+fn copy_initializers_use_the_type_copy_function() {
+    succeeds(
+        r#"
+extern symbol copy_observer { code: "std::int64_t copies=0;", }
+extern type Score { cpp_name: "std::int64_t", }
+extern fn score() -> Score {
+    cpp_name: "make_score",
+    code: "Obj<std::int64_t> make_score(Loc) { return make_obj<std::int64_t>(7); }",
+}
+extern fn copy(x:Score) -> Score {
+    cpp_name: "copy_score",
+    code: "Obj<std::int64_t> copy_score(Obj<std::int64_t> x, Loc) { ++copies; return make_obj<std::int64_t>(*x); }",
+}
+extern fn copy_count() -> Int {
+    cpp_name: "copy_count",
+    code: "Obj<std::int64_t> copy_count(Loc) { return make_obj<std::int64_t>(copies); }",
+}
+let original:=score();
+let shared:=original; wt copy_count();
+let detached = original; wt copy_count();
+"#,
+        "",
+        "0\n1\n",
+    );
+}
+
+#[test]
+fn invalid_copy_initializers_report_rusk_errors() {
+    for source in [
+        "let x = [];",
+        "let x:Int = true;",
+        "let x = x;",
+        "let x:Int; let y = x;",
+        "let x += 1;",
+        "let x:Int; x=1;",
+        "extern type Score { cpp_name: \"double\", } extern fn score()->Score { cpp_name: \"score\", code: \"Obj<double> score(Loc) { return make_obj<double>(1); }\", } let x = score();",
+    ] {
+        let case = Case::new(source);
+        let out = case.compile();
+        assert!(!out.status.success(), "{source}");
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(error.contains("main.rusk:"), "{source}: {error}");
+        assert!(!case.0.join("main.cpp").exists(), "{source}");
+    }
+}

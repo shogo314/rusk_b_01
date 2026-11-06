@@ -3,6 +3,6 @@
 // 親の走査
 in n:Int;
 in parents(n-1):Vec<Int>;
-let current:=copy(n); let generations:=0;
+let current = n; let generations:=0;
 while current>1 { current:=parents[current-2]; generations+=1; }
 wt generations;

@@ -2,6 +2,6 @@
 // https://atcoder.jp/contests/abc080/tasks/abc080_b
 // 桁の和
 in n:Int;
-let value:=copy(n); let digits:=0;
+let value = n; let digits:=0;
 while value { digits+=value%10; value/=10; }
 wt n%digits==0;
