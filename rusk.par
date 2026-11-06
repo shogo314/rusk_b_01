@@ -1,0 +1,41 @@
+%start Rusk
+%title "Rusk beta prototype"
+%line_comment "//"
+%%
+Rusk: { Statement };
+Statement: ExternType | ExternFn | ExternSymbol | Let | Input | Output | If | While | Loop | Break | Continue | Block | Expr ';'^;
+ExternType: 'extern'^ 'type'^ Identifier '{'^ Properties '}'^;
+ExternFn: 'extern'^ 'fn'^ Identifier '('^ Parameters ')'^ [ '->'^ Identifier ] '{'^ Properties '}'^;
+ExternSymbol: 'extern'^ 'symbol'^ Identifier '{'^ Properties '}'^;
+Parameters: [ Parameter { ','^ Parameter } ];
+Parameter: Identifier ':'^ Identifier;
+Properties: { Property };
+Property: Identifier ':'^ StringLiteral ','^;
+Let: 'let'^ Identifier [ ':'^ Identifier ] [ ':='^ Expr ] ';'^;
+Input: 'in'^ InputItem { ','^ InputItem } ';'^;
+InputItem: Identifier { ','^ Identifier } ':'^ Identifier;
+Output: 'wt'^ ExprList ';'^;
+Block: '{'^ { Statement } '}'^;
+ExprList: [ Expr { ','^ Expr } ];
+If: 'if'^ Expr Block [ 'else'^ Block ];
+While: 'while'^ Expr Block [ 'else'^ Block ];
+Loop: 'loop'^ Block;
+Break: 'break' ';'^;
+Continue: 'continue' ';'^;
+Expr: Compare [ AssignOp Expr ];
+Compare: Add [ CompareOp Add ];
+CompareOp: '==' | '!=' | '<' | '<=' | '>' | '>=';
+AssignOp: ':=' | '=' | '+=' | '-=' | '*=' | '/=' | '%=';
+Add: Mul { AddOp Mul };
+AddOp: '+' | '-';
+Mul: Unary { MulOp Unary };
+MulOp: '*' | '/' | '%';
+Unary: UnaryOp Unary | Primary;
+UnaryOp: '+' | '-';
+Primary: Literal | Identifier [ '('^ ExprList ')'^ ] | '('^ Expr ')'^;
+Literal: IntLiteral | StringLiteral | CharLiteral | BoolLiteral;
+BoolLiteral: 'true' | 'false';
+IntLiteral: /[0-9]+/;
+StringLiteral: /"(\\.|[^"\\])*"/;
+CharLiteral: /'(\\.|[^'\\])'/;
+Identifier: /[a-zA-Z_][a-zA-Z0-9_]*/;

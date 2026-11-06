@@ -1,3 +1,6 @@
 /site/
 /.venv-docs/
 __pycache__/
+/target/
+/a.cpp
+/a.out

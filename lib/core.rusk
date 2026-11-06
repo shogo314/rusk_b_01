@@ -1,0 +1,272 @@
+// C++ backend definitions. code/cpp_name are provisional prototype properties.
+
+extern symbol __core__ {
+    code: "#include <cstdint>\n#include <cstdlib>\n#include <iostream>\n#include <memory>\n#include <utility>\n#include <string>\n#include <charconv>\n#include <limits>\n#include <system_error>\nstruct Unit {};\nstruct Loc { const char* file; unsigned line, column; };\ntemplate<class T> using Obj = std::shared_ptr<T>;\ntemplate<class T> Obj<T> make_obj(T value) { return std::make_shared<T>(std::move(value)); }\n[[noreturn]] inline void fail(Loc loc, const char* message) {\n    std::cerr << loc.file << ':' << loc.line << ':' << loc.column << \": \" << message << '\\n';\n    std::exit(1);\n}\ninline std::int64_t checked_int(__int128 value, Loc loc) {\n    if (value < std::numeric_limits<std::int64_t>::min() || value > std::numeric_limits<std::int64_t>::max()) fail(loc, \"integer overflow\");\n    return static_cast<std::int64_t>(value);\n}\ninline bool ascii_space(int c) { return c == ' ' || (c >= 9 && c <= 13); }\ninline std::string read_token(Loc loc) {\n    while (ascii_space(std::cin.peek())) std::cin.get();\n    if (std::cin.peek() == std::char_traits<char>::eof()) fail(loc, \"unexpected end of input\");\n    std::string token;\n    while (std::cin.peek() != std::char_traits<char>::eof() && !ascii_space(std::cin.peek())) token.push_back(static_cast<char>(std::cin.get()));\n    return token;\n}\ninline void require_ascii(const std::string& text, Loc loc) {\n    for (unsigned char c : text) if (c > 127) fail(loc, \"non-ASCII input\");\n}\n",
+}
+
+extern type Int {
+    cpp_name: "std::int64_t",
+}
+
+extern type Bool {
+    cpp_name: "bool",
+}
+
+extern type Char {
+    cpp_name: "char",
+}
+
+extern type Str {
+    cpp_name: "std::string",
+}
+
+extern type Unit {
+    cpp_name: "Unit",
+}
+
+extern fn copy(x: Int) -> Int {
+    cpp_name: "copy_Int",
+    code: "inline Obj<std::int64_t> copy_Int(Obj<std::int64_t> x, Loc) { return make_obj<std::int64_t>(*x); }",
+}
+
+extern fn __assign__(x: Int, y: Int) {
+    cpp_name: "assign_Int",
+    code: "inline void assign_Int(Obj<std::int64_t> x, Obj<std::int64_t> y, Loc) { *x = *y; }",
+}
+
+extern fn __write__(x: Int) {
+    cpp_name: "write_Int",
+    code: "inline void write_Int(Obj<std::int64_t> x, Loc) { std::cout << *x; }",
+}
+
+extern fn copy(x: Bool) -> Bool {
+    cpp_name: "copy_Bool",
+    code: "inline Obj<bool> copy_Bool(Obj<bool> x, Loc) { return make_obj<bool>(*x); }",
+}
+
+extern fn __assign__(x: Bool, y: Bool) {
+    cpp_name: "assign_Bool",
+    code: "inline void assign_Bool(Obj<bool> x, Obj<bool> y, Loc) { *x = *y; }",
+}
+
+extern fn __write__(x: Bool) {
+    cpp_name: "write_Bool",
+    code: "inline void write_Bool(Obj<bool> x, Loc) { std::cout << (*x ? \"Yes\" : \"No\"); }",
+}
+
+extern fn copy(x: Char) -> Char {
+    cpp_name: "copy_Char",
+    code: "inline Obj<char> copy_Char(Obj<char> x, Loc) { return make_obj<char>(*x); }",
+}
+
+extern fn __assign__(x: Char, y: Char) {
+    cpp_name: "assign_Char",
+    code: "inline void assign_Char(Obj<char> x, Obj<char> y, Loc) { *x = *y; }",
+}
+
+extern fn __write__(x: Char) {
+    cpp_name: "write_Char",
+    code: "inline void write_Char(Obj<char> x, Loc) { std::cout << *x; }",
+}
+
+extern fn copy(x: Str) -> Str {
+    cpp_name: "copy_Str",
+    code: "inline Obj<std::string> copy_Str(Obj<std::string> x, Loc) { return make_obj<std::string>(*x); }",
+}
+
+extern fn __assign__(x: Str, y: Str) {
+    cpp_name: "assign_Str",
+    code: "inline void assign_Str(Obj<std::string> x, Obj<std::string> y, Loc) { *x = *y; }",
+}
+
+extern fn __write__(x: Str) {
+    cpp_name: "write_Str",
+    code: "inline void write_Str(Obj<std::string> x, Loc) { std::cout << *x; }",
+}
+
+extern fn copy(x: Unit) -> Unit {
+    cpp_name: "copy_Unit",
+    code: "inline Obj<Unit> copy_Unit(Obj<Unit> x, Loc) { return make_obj<Unit>(*x); }",
+}
+
+extern fn __assign__(x: Unit, y: Unit) {
+    cpp_name: "assign_Unit",
+    code: "inline void assign_Unit(Obj<Unit> x, Obj<Unit> y, Loc) { *x = *y; }",
+}
+
+extern fn __add__(a: Int, b: Int) -> Int {
+    cpp_name: "add_Int",
+    code: "inline Obj<std::int64_t> add_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) { return make_obj<std::int64_t>(checked_int((__int128)*a + *b, loc)); }",
+}
+
+extern fn __sub__(a: Int, b: Int) -> Int {
+    cpp_name: "sub_Int",
+    code: "inline Obj<std::int64_t> sub_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) { return make_obj<std::int64_t>(checked_int((__int128)*a - *b, loc)); }",
+}
+
+extern fn __mul__(a: Int, b: Int) -> Int {
+    cpp_name: "mul_Int",
+    code: "inline Obj<std::int64_t> mul_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) { return make_obj<std::int64_t>(checked_int((__int128)*a * *b, loc)); }",
+}
+
+extern fn __div__(a: Int, b: Int) -> Int {
+    cpp_name: "div_Int",
+    code: "inline Obj<std::int64_t> div_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) {\nif (*b == 0) fail(loc, \"division by zero\");\n    __int128 a0 = *a, b0 = *b;\n    __int128 q = a0 / b0, r = a0 % b0;\n    if (r != 0 && ((r < 0) != (b0 < 0))) { --q; r += b0; }\n    return make_obj<std::int64_t>(checked_int(q, loc));\n}",
+}
+
+extern fn __mod__(a: Int, b: Int) -> Int {
+    cpp_name: "mod_Int",
+    code: "inline Obj<std::int64_t> mod_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc loc) {\nif (*b == 0) fail(loc, \"division by zero\");\n    __int128 a0 = *a, b0 = *b;\n    __int128 q = a0 / b0, r = a0 % b0;\n    if (r != 0 && ((r < 0) != (b0 < 0))) { --q; r += b0; }\n    return make_obj<std::int64_t>(checked_int(r, loc));\n}",
+}
+
+extern fn __neg__(x: Int) -> Int {
+    cpp_name: "neg_Int",
+    code: "inline Obj<std::int64_t> neg_Int(Obj<std::int64_t> x, Loc loc) { return make_obj<std::int64_t>(checked_int(-(__int128)*x, loc)); }",
+}
+
+extern fn __pos__(x: Int) -> Int {
+    cpp_name: "pos_Int",
+    code: "inline Obj<std::int64_t> pos_Int(Obj<std::int64_t> x, Loc loc) { return make_obj<std::int64_t>(checked_int((__int128)*x, loc)); }",
+}
+
+extern fn __read__() -> Int {
+    cpp_name: "read_Int",
+    code: "inline Obj<std::int64_t> read_Int(Loc loc) {\n    auto token = read_token(loc);\n    const char* first = token.data(); const char* last = first + token.size();\n    if (first != last && *first == '+') { ++first; if (first == last || *first < '0' || *first > '9') fail(loc, \"invalid integer input\"); }\n    std::int64_t value = 0;\n    auto result = std::from_chars(first, last, value);\n    if (result.ec == std::errc::result_out_of_range) fail(loc, \"integer input out of range\");\n    if (result.ec != std::errc{} || result.ptr != last) fail(loc, \"invalid integer input\");\n    return make_obj<std::int64_t>(value);\n}",
+}
+
+extern fn __read__() -> Str {
+    cpp_name: "read_Str",
+    code: "inline Obj<std::string> read_Str(Loc loc) {\n    auto value = read_token(loc); require_ascii(value, loc); return make_obj<std::string>(value);\n}",
+}
+
+extern fn __read__() -> Char {
+    cpp_name: "read_Char",
+    code: "inline Obj<char> read_Char(Loc loc) {\n    while (ascii_space(std::cin.peek())) std::cin.get();\n    int c = std::cin.get();\n    if (c == std::char_traits<char>::eof()) fail(loc, \"unexpected end of input\");\n    if (c > 127) fail(loc, \"non-ASCII input\");\n    return make_obj<char>(static_cast<char>(c));\n}",
+}
+
+extern fn read_line() -> Str {
+    cpp_name: "read_line_Str",
+    code: "inline Obj<std::string> read_line_Str(Loc loc) {\n    std::string value;\n    if (!std::getline(std::cin, value)) fail(loc, \"unexpected end of input\");\n    if (!value.empty() && value.back() == '\\r') value.pop_back();\n    require_ascii(value, loc); return make_obj<std::string>(value);\n}",
+}
+
+// Conditions and value comparisons. Hook names are provisional.
+extern fn __bool__(x: Int) -> Bool {
+    cpp_name: "bool_Int",
+    code: "inline Obj<bool> bool_Int(Obj<std::int64_t> x, Loc) { return make_obj<bool>(*x != 0); }",
+}
+
+extern fn __eq__(a: Int, b: Int) -> Bool {
+    cpp_name: "eq_Int",
+    code: "inline Obj<bool> eq_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Int, b: Int) -> Bool {
+    cpp_name: "ne_Int",
+    code: "inline Obj<bool> ne_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __lt__(a: Int, b: Int) -> Bool {
+    cpp_name: "lt_Int",
+    code: "inline Obj<bool> lt_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a < *b); }",
+}
+
+extern fn __le__(a: Int, b: Int) -> Bool {
+    cpp_name: "le_Int",
+    code: "inline Obj<bool> le_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a <= *b); }",
+}
+
+extern fn __gt__(a: Int, b: Int) -> Bool {
+    cpp_name: "gt_Int",
+    code: "inline Obj<bool> gt_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a > *b); }",
+}
+
+extern fn __ge__(a: Int, b: Int) -> Bool {
+    cpp_name: "ge_Int",
+    code: "inline Obj<bool> ge_Int(Obj<std::int64_t> a, Obj<std::int64_t> b, Loc) { return make_obj<bool>(*a >= *b); }",
+}
+
+extern fn __bool__(x: Bool) -> Bool {
+    cpp_name: "bool_Bool",
+    code: "inline Obj<bool> bool_Bool(Obj<bool> x, Loc) { return make_obj<bool>(*x != 0); }",
+}
+
+extern fn __eq__(a: Bool, b: Bool) -> Bool {
+    cpp_name: "eq_Bool",
+    code: "inline Obj<bool> eq_Bool(Obj<bool> a, Obj<bool> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Bool, b: Bool) -> Bool {
+    cpp_name: "ne_Bool",
+    code: "inline Obj<bool> ne_Bool(Obj<bool> a, Obj<bool> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __bool__(x: Char) -> Bool {
+    cpp_name: "bool_Char",
+    code: "inline Obj<bool> bool_Char(Obj<char> x, Loc) { return make_obj<bool>(*x != 0); }",
+}
+
+extern fn __eq__(a: Char, b: Char) -> Bool {
+    cpp_name: "eq_Char",
+    code: "inline Obj<bool> eq_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Char, b: Char) -> Bool {
+    cpp_name: "ne_Char",
+    code: "inline Obj<bool> ne_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __lt__(a: Char, b: Char) -> Bool {
+    cpp_name: "lt_Char",
+    code: "inline Obj<bool> lt_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a < *b); }",
+}
+
+extern fn __le__(a: Char, b: Char) -> Bool {
+    cpp_name: "le_Char",
+    code: "inline Obj<bool> le_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a <= *b); }",
+}
+
+extern fn __gt__(a: Char, b: Char) -> Bool {
+    cpp_name: "gt_Char",
+    code: "inline Obj<bool> gt_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a > *b); }",
+}
+
+extern fn __ge__(a: Char, b: Char) -> Bool {
+    cpp_name: "ge_Char",
+    code: "inline Obj<bool> ge_Char(Obj<char> a, Obj<char> b, Loc) { return make_obj<bool>(*a >= *b); }",
+}
+
+extern fn __bool__(x: Str) -> Bool {
+    cpp_name: "bool_Str",
+    code: "inline Obj<bool> bool_Str(Obj<std::string> x, Loc) { return make_obj<bool>(!x->empty()); }",
+}
+
+extern fn __eq__(a: Str, b: Str) -> Bool {
+    cpp_name: "eq_Str",
+    code: "inline Obj<bool> eq_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a == *b); }",
+}
+
+extern fn __ne__(a: Str, b: Str) -> Bool {
+    cpp_name: "ne_Str",
+    code: "inline Obj<bool> ne_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a != *b); }",
+}
+
+extern fn __lt__(a: Str, b: Str) -> Bool {
+    cpp_name: "lt_Str",
+    code: "inline Obj<bool> lt_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a < *b); }",
+}
+
+extern fn __le__(a: Str, b: Str) -> Bool {
+    cpp_name: "le_Str",
+    code: "inline Obj<bool> le_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a <= *b); }",
+}
+
+extern fn __gt__(a: Str, b: Str) -> Bool {
+    cpp_name: "gt_Str",
+    code: "inline Obj<bool> gt_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a > *b); }",
+}
+
+extern fn __ge__(a: Str, b: Str) -> Bool {
+    cpp_name: "ge_Str",
+    code: "inline Obj<bool> ge_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a >= *b); }",
+}
+
