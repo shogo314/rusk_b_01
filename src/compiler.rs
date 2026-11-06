@@ -8,6 +8,7 @@ struct Function {
     result: String,
     cpp: String,
     code: String,
+    body: Option<(Vec<Name>, Box<Stmt>)>,
 }
 #[derive(Clone)]
 struct Variable {
@@ -30,6 +31,7 @@ pub struct Compiler {
     counter: usize,
     used: BTreeSet<usize>,
     loops: Vec<Option<String>>,
+    return_type: Option<String>,
 }
 fn quoted(s: &str) -> String {
     let mut out = String::from("\"");
@@ -79,8 +81,23 @@ impl Compiler {
         for source in sources {
             for s in source {
                 match s {
-                    Stmt::Function(n, params, result, p) => {
-                        validate(n, p, &["cpp_name", "code"])?;
+                    Stmt::Function(n, params, result, _)
+                    | Stmt::UserFunction(n, params, result, _) => {
+                        let (cpp, code, body) = match s {
+                            Stmt::Function(_, _, _, p) => {
+                                validate(n, p, &["cpp_name", "code"])?;
+                                (property(n, p, "cpp_name")?, property(n, p, "code")?, None)
+                            }
+                            Stmt::UserFunction(_, params, _, body) => (
+                                format!("rusk_fn{}", self.functions.len()),
+                                String::new(),
+                                Some((
+                                    params.iter().map(|(n, _)| n.clone()).collect(),
+                                    body.clone(),
+                                )),
+                            ),
+                            _ => unreachable!(),
+                        };
                         let mut names = BTreeSet::new();
                         for (param, ty) in params {
                             self.check_type(ty)?;
@@ -110,8 +127,9 @@ impl Compiler {
                             name: n.clone(),
                             params,
                             result,
-                            cpp: property(n, p, "cpp_name")?,
-                            code: property(n, p, "code")?,
+                            cpp,
+                            code,
+                            body,
                         });
                     }
                     Stmt::Symbol(n, p) => {
@@ -128,6 +146,12 @@ impl Compiler {
                 }
             }
         }
+        // Check every body, including unused functions, in an isolated variable scope.
+        for i in 0..self.functions.len() {
+            if self.functions[i].body.is_some() {
+                self.compile_function(i)?;
+            }
+        }
         self.scopes.push(BTreeMap::new());
         for source in sources {
             for s in source {
@@ -140,14 +164,82 @@ impl Compiler {
             out.push_str(code);
             out.push('\n');
         }
+        for f in &self.functions {
+            if f.body.is_some() {
+                out.push_str(&self.signature(f));
+                out.push_str(";\n");
+            }
+        }
         for i in &self.used {
-            out.push_str(&self.functions[*i].code);
-            out.push('\n');
+            if self.functions[*i].body.is_none() {
+                out.push_str(&self.functions[*i].code);
+                out.push('\n');
+            }
+        }
+        for f in &self.functions {
+            if f.body.is_some() {
+                out.push_str(&f.code);
+                out.push('\n');
+            }
         }
         out.push_str("int main() {\n");
         out.push_str(&self.body);
         out.push_str("return 0;\n}\n");
         Ok(out)
+    }
+    fn signature(&self, f: &Function) -> String {
+        let result = if f.result == "Unit" {
+            "void".into()
+        } else {
+            format!("Obj<{}>", self.types[&f.result])
+        };
+        let mut params: Vec<_> = f
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, ty)| format!("Obj<{}> rusk_p{i}", self.types[ty]))
+            .collect();
+        params.push("[[maybe_unused]] Loc rusk_call_loc".into());
+        format!("{result} {}({})", f.cpp, params.join(", "))
+    }
+    fn compile_function(&mut self, index: usize) -> Result<(), String> {
+        let f = self.functions[index].clone();
+        let (params, body) = f.body.as_ref().unwrap();
+        if f.result != "Unit" && !definitely_returns(body) {
+            return Err(f
+                .name
+                .span
+                .error("function may finish without returning a value"));
+        }
+        self.return_type = Some(f.result.clone());
+        self.scopes = vec![BTreeMap::new()];
+        self.body.clear();
+        for (i, (param, ty)) in params.iter().zip(&f.params).enumerate() {
+            self.declare(
+                param,
+                ty.clone(),
+                Some(Value {
+                    cpp: format!("rusk_p{i}"),
+                    ty: ty.clone(),
+                }),
+            )?;
+        }
+        let Stmt::Block(statements) = body.as_ref() else {
+            unreachable!()
+        };
+        for statement in statements {
+            self.statement(statement)?;
+        }
+        self.functions[index].code = format!(
+            "{} {{\n{}{}\n}}\n",
+            self.signature(&f),
+            self.body,
+            if f.result == "Unit" { "return;" } else { "" }
+        );
+        self.scopes.clear();
+        self.body.clear();
+        self.return_type = None;
+        Ok(())
     }
     fn check_type(&self, n: &Name) -> Result<(), String> {
         if self.types.contains_key(&n.text) {
@@ -309,7 +401,34 @@ impl Compiler {
     }
     fn statement(&mut self, s: &Stmt) -> Result<(), String> {
         match s {
-            Stmt::Type(..) | Stmt::Function(..) | Stmt::Symbol(..) => {}
+            Stmt::Type(n, _)
+            | Stmt::Function(n, ..)
+            | Stmt::UserFunction(n, ..)
+            | Stmt::Symbol(n, _) => {
+                if self.return_type.is_some() || self.scopes.len() != 1 {
+                    return Err(n
+                        .span
+                        .error("type and function declarations are currently top-level only"));
+                }
+            }
+            Stmt::Return(span, value) => {
+                let expected = self
+                    .return_type
+                    .clone()
+                    .ok_or_else(|| span.error("return outside a function"))?;
+                if let Some(value) = value {
+                    let value = self.expr(value, Some(&expected))?;
+                    self.same(&expected, &value.ty, span)?;
+                    if expected == "Unit" {
+                        self.body.push_str("return;\n");
+                    } else {
+                        self.body.push_str(&format!("return {};\n", value.cpp));
+                    }
+                } else {
+                    self.same("Unit", &expected, span)?;
+                    self.body.push_str("return;\n");
+                }
+            }
             Stmt::Let(n, t, e) => {
                 if let Some(t) = t {
                     self.check_type(t)?;
@@ -361,7 +480,13 @@ impl Compiler {
                     self.statement(no)?;
                 }
                 self.body.push_str("}\n");
-                self.intersect_initialization(&yes_state);
+                if definitely_returns(yes) {
+                    // Only the other branch reaches the following statement.
+                } else if no.as_ref().is_some_and(|no| definitely_returns(no)) {
+                    self.scopes = yes_state;
+                } else {
+                    self.intersect_initialization(&yes_state);
+                }
             }
             Stmt::While(cond, body, otherwise) => {
                 let broken = otherwise.as_ref().map(|_| self.temp());
@@ -449,6 +574,30 @@ impl Compiler {
     fn expr(&mut self, e: &Expr, expected: Option<&str>) -> Result<Value, String> {
         match &e.kind {
             ExprKind::Literal(ty, text) => self.literal(ty, text, &e.span),
+            ExprKind::Array(items) => {
+                if items.is_empty() && expected != Some("Vec<Int>") {
+                    return Err(e
+                        .span
+                        .error("empty array requires a Vec<Int> type annotation"));
+                }
+                let array = self.call("__vec_int__", vec![], None, &e.span)?;
+                for item in items {
+                    let value = self.expr(item, Some("Int"))?;
+                    self.same("Int", &value.ty, &item.span)?;
+                    self.call("push_back", vec![array.clone(), value], None, &item.span)?;
+                }
+                Ok(array)
+            }
+            ExprKind::Repeat(initial, count) => {
+                let initial = self.expr(initial, Some("Int"))?;
+                let count = self.expr(count, Some("Int"))?;
+                self.call("__vec_repeat_int__", vec![initial, count], None, &e.span)
+            }
+            ExprKind::Index(array, index) => {
+                let array = self.expr(array, None)?;
+                let index = self.expr(index, Some("Int"))?;
+                self.call("__getitem__", vec![array, index], None, &e.span)
+            }
             ExprKind::Var(n) => {
                 let v = self.find_var(n)?;
                 if !v.initialized {
@@ -458,8 +607,27 @@ impl Compiler {
             }
             ExprKind::Call(n, args) => {
                 let mut values = vec![];
-                for arg in args {
-                    values.push(self.expr(arg, None)?);
+                for (index, arg) in args.iter().enumerate() {
+                    // Use a context only when every remaining overload agrees.
+                    let hints: BTreeSet<_> = self
+                        .functions
+                        .iter()
+                        .filter(|f| {
+                            f.name.text == n.text
+                                && f.params.len() == args.len()
+                                && f.params
+                                    .iter()
+                                    .zip(&values)
+                                    .all(|(ty, v): (&String, &Value)| ty == &v.ty)
+                        })
+                        .map(|f| f.params[index].clone())
+                        .collect();
+                    let hint = if hints.len() == 1 {
+                        hints.first().map(String::as_str)
+                    } else {
+                        None
+                    };
+                    values.push(self.expr(arg, hint)?);
                 }
                 self.call(&n.text, values, expected, &e.span)
             }
@@ -487,8 +655,16 @@ impl Compiler {
             }
             ExprKind::Assign(op, left, right) => {
                 if op == ":=" {
+                    if let ExprKind::Index(array, index) = &left.kind {
+                        let array = self.expr(array, None)?;
+                        let index = self.expr(index, Some("Int"))?;
+                        let rhs = self.expr(right, Some("Int"))?;
+                        return self.call("__setitem__", vec![array, index, rhs], None, &e.span);
+                    }
                     let ExprKind::Var(n) = &left.kind else {
-                        return Err(e.span.error("rebinding currently requires a variable"));
+                        return Err(e
+                            .span
+                            .error("rebinding requires a variable or an index access"));
                     };
                     let v = self.find_var(n)?;
                     let r = self.expr(right, Some(&v.ty))?;
@@ -543,5 +719,14 @@ fn binary_name(op: &str) -> &str {
         ">" => "__gt__",
         ">=" => "__ge__",
         _ => unreachable!(),
+    }
+}
+
+fn definitely_returns(statement: &Stmt) -> bool {
+    match statement {
+        Stmt::Return(..) => true,
+        Stmt::Block(statements) => statements.iter().any(definitely_returns),
+        Stmt::If(_, yes, Some(no)) => definitely_returns(yes) && definitely_returns(no),
+        _ => false,
     }
 }

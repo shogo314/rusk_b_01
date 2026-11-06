@@ -270,3 +270,62 @@ extern fn __ge__(a: Str, b: Str) -> Bool {
     code: "inline Obj<bool> ge_Str(Obj<std::string> a, Obj<std::string> b, Loc) { return make_obj<bool>(*a >= *b); }",
 }
 
+
+// First concrete array type. General generics are not implemented yet.
+extern symbol __vec_int_runtime__ {
+    code: "#include <vector>\nusing IntVec = std::vector<Obj<std::int64_t>>;\ninline std::size_t vec_int_index(const IntVec& a, std::int64_t index, Loc loc) {\n    __int128 position = index;\n    if (position < 0) position += static_cast<__int128>(a.size());\n    if (position < 0 || position >= static_cast<__int128>(a.size())) fail(loc, \"array index out of range\");\n    return static_cast<std::size_t>(position);\n}\ninline IntVec vec_int_copy(const IntVec& a) {\n    IntVec result;\n    result.reserve(a.size());\n    for (const auto& value : a) result.push_back(make_obj<std::int64_t>(*value));\n    return result;\n}\n",
+}
+
+extern type Vec<Int> {
+    cpp_name: "IntVec",
+}
+
+extern fn __vec_int__() -> Vec<Int> {
+    cpp_name: "new_vec_int",
+    code: "Obj<IntVec> new_vec_int(Loc) { return make_obj<IntVec>(IntVec{}); }",
+}
+
+extern fn len(a: Vec<Int>) -> Int {
+    cpp_name: "len_vec_int",
+    code: "Obj<std::int64_t> len_vec_int(Obj<IntVec> a, Loc loc) { return make_obj<std::int64_t>(checked_int(static_cast<__int128>(a->size()), loc)); }",
+}
+
+extern fn push_back(a: Vec<Int>, x: Int) {
+    cpp_name: "push_back_vec_int",
+    code: "void push_back_vec_int(Obj<IntVec> a, Obj<std::int64_t> x, Loc) { a->push_back(x); }",
+}
+
+extern fn __getitem__(a: Vec<Int>, i: Int) -> Int {
+    cpp_name: "getitem_vec_int",
+    code: "Obj<std::int64_t> getitem_vec_int(Obj<IntVec> a, Obj<std::int64_t> i, Loc loc) { return (*a)[vec_int_index(*a, *i, loc)]; }",
+}
+
+extern fn __setitem__(a: Vec<Int>, i: Int, x: Int) -> Int {
+    cpp_name: "setitem_vec_int",
+    code: "Obj<std::int64_t> setitem_vec_int(Obj<IntVec> a, Obj<std::int64_t> i, Obj<std::int64_t> x, Loc loc) { (*a)[vec_int_index(*a, *i, loc)] = x; return x; }",
+}
+
+extern fn copy(a: Vec<Int>) -> Vec<Int> {
+    cpp_name: "copy_vec_int",
+    code: "Obj<IntVec> copy_vec_int(Obj<IntVec> a, Loc) { return make_obj<IntVec>(vec_int_copy(*a)); }",
+}
+
+extern fn __assign__(a: Vec<Int>, b: Vec<Int>) {
+    cpp_name: "assign_vec_int",
+    code: "void assign_vec_int(Obj<IntVec> a, Obj<IntVec> b, Loc) { auto snapshot = vec_int_copy(*b); *a = std::move(snapshot); }",
+}
+
+extern fn __bool__(a: Vec<Int>) -> Bool {
+    cpp_name: "bool_vec_int",
+    code: "Obj<bool> bool_vec_int(Obj<IntVec> a, Loc) { return make_obj<bool>(!a->empty()); }",
+}
+
+extern fn __write__(a: Vec<Int>) {
+    cpp_name: "write_vec_int",
+    code: "void write_vec_int(Obj<IntVec> a, Loc) { for (std::size_t i = 0; i < a->size(); ++i) { if (i) std::cout << ' '; std::cout << *(*a)[i]; } }",
+}
+
+extern fn __vec_repeat_int__(initial: Int, count: Int) -> Vec<Int> {
+    cpp_name: "repeat_vec_int",
+    code: "Obj<IntVec> repeat_vec_int(Obj<std::int64_t> initial, Obj<std::int64_t> count, Loc loc) {\n    if (*count < 0) fail(loc, \"negative array length\");\n    auto result = make_obj<IntVec>(IntVec{});\n    if (static_cast<__int128>(*count) > static_cast<__int128>(result->max_size())) fail(loc, \"array length out of range\");\n    const auto size = static_cast<std::size_t>(*count);\n    result->reserve(size);\n    for (std::size_t i = 0; i < size; ++i) result->push_back(make_obj<std::int64_t>(*initial));\n    return result;\n}",
+}

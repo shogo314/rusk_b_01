@@ -31,6 +31,13 @@ fn name(n: &g::Identifier<'_>) -> Name {
         span: Span::token(&n.identifier),
     }
 }
+fn type_name(t: &g::TypeName<'_>) -> Name {
+    let mut n = name(&t.identifier);
+    if let Some(arg) = &t.type_name_opt {
+        n.text = format!("{}<{}>", n.text, type_name(&arg.type_name).text);
+    }
+    n
+}
 #[derive(Clone, Debug)]
 pub struct Expr {
     pub kind: ExprKind,
@@ -39,6 +46,9 @@ pub struct Expr {
 #[derive(Clone, Debug)]
 pub enum ExprKind {
     Literal(String, String),
+    Array(Vec<Expr>),
+    Repeat(Box<Expr>, Box<Expr>),
+    Index(Box<Expr>, Box<Expr>),
     Var(Name),
     Call(Name, Vec<Expr>),
     Binary(String, Box<Expr>, Box<Expr>),
@@ -54,6 +64,8 @@ pub enum Stmt {
         Option<Name>,
         BTreeMap<String, String>,
     ),
+    UserFunction(Name, Vec<(Name, Name)>, Option<Name>, Box<Stmt>),
+    Return(Span, Option<Expr>),
     Symbol(Name, BTreeMap<String, String>),
     Let(Name, Option<Name>, Option<Expr>),
     Input(Vec<(Name, Name)>),
@@ -85,7 +97,7 @@ pub fn lower(root: &g::Rusk<'_>) -> Result<Vec<Stmt>, String> {
 fn stmt(s: &g::Statement<'_>) -> Result<Stmt, String> {
     Ok(match s {
         g::Statement::ExternType(x) => Stmt::Type(
-            name(&x.extern_type.identifier),
+            type_name(&x.extern_type.type_name),
             props(&x.extern_type.properties)?,
         ),
         g::Statement::ExternSymbol(x) => Stmt::Symbol(
@@ -98,27 +110,57 @@ fn stmt(s: &g::Statement<'_>) -> Result<Stmt, String> {
             if let Some(p) = &x.parameters.parameters_opt {
                 params.push((
                     name(&p.parameter.identifier),
-                    name(&p.parameter.identifier0),
+                    type_name(&p.parameter.type_name),
                 ));
                 params.extend(p.parameters_opt_list.iter().map(|p| {
                     (
                         name(&p.parameter.identifier),
-                        name(&p.parameter.identifier0),
+                        type_name(&p.parameter.type_name),
                     )
                 }));
             }
             Stmt::Function(
                 name(&x.identifier),
                 params,
-                x.extern_fn_opt.as_ref().map(|r| name(&r.identifier)),
+                x.extern_fn_opt.as_ref().map(|r| type_name(&r.type_name)),
                 props(&x.properties)?,
             )
         }
+        g::Statement::Function(x) => {
+            let x = &x.function;
+            let mut params = vec![];
+            if let Some(p) = &x.parameters.parameters_opt {
+                params.push((
+                    name(&p.parameter.identifier),
+                    type_name(&p.parameter.type_name),
+                ));
+                params.extend(p.parameters_opt_list.iter().map(|p| {
+                    (
+                        name(&p.parameter.identifier),
+                        type_name(&p.parameter.type_name),
+                    )
+                }));
+            }
+            Stmt::UserFunction(
+                name(&x.identifier),
+                params,
+                x.function_opt.as_ref().map(|r| type_name(&r.type_name)),
+                Box::new(block(&x.block)?),
+            )
+        }
+        g::Statement::Return(x) => Stmt::Return(
+            Span::token(&x.r#return.r#return),
+            x.r#return
+                .return_opt
+                .as_ref()
+                .map(|x| expr(&x.expr))
+                .transpose()?,
+        ),
         g::Statement::Let(x) => {
             let x = &x.r#let;
             Stmt::Let(
                 name(&x.identifier),
-                x.let_opt.as_ref().map(|t| name(&t.identifier)),
+                x.let_opt.as_ref().map(|t| type_name(&t.type_name)),
                 x.let_opt0.as_ref().map(|e| expr(&e.expr)).transpose()?,
             )
         }
@@ -127,7 +169,7 @@ fn stmt(s: &g::Statement<'_>) -> Result<Stmt, String> {
             for item in std::iter::once(x.input.input_item.as_ref())
                 .chain(x.input.input_list.iter().map(|i| i.input_item.as_ref()))
             {
-                let ty = name(&item.identifier0);
+                let ty = type_name(&item.type_name);
                 items.push((name(&item.identifier), ty.clone()));
                 items.extend(
                     item.input_item_list
@@ -258,11 +300,58 @@ fn unary(e: &g::Unary<'_>) -> Result<Expr, String> {
                 span: Span::token(t),
             })
         }
-        g::Unary::Primary(x) => primary(&x.primary),
+        g::Unary::Postfix(x) => postfix(&x.postfix),
     }
+}
+fn postfix(p: &g::Postfix<'_>) -> Result<Expr, String> {
+    let mut value = primary(&p.primary)?;
+    for suffix in &p.postfix_list {
+        value = match suffix.suffix.as_ref() {
+            g::Suffix::Index(x) => Expr {
+                kind: ExprKind::Index(Box::new(value), Box::new(expr(&x.index.expr)?)),
+                span: Span::token(&x.index.l_bracket),
+            },
+            g::Suffix::Method(x) => {
+                let n = name(&x.method.identifier);
+                let mut args = vec![value];
+                args.extend(list(&x.method.expr_list)?);
+                Expr {
+                    span: n.span.clone(),
+                    kind: ExprKind::Call(n, args),
+                }
+            }
+        };
+    }
+    Ok(value)
 }
 fn primary(e: &g::Primary<'_>) -> Result<Expr, String> {
     Ok(match e {
+        g::Primary::Array(x) => {
+            let kind = if let Some(items) = &x.array.array_opt {
+                let first = expr(&items.expr)?;
+                match items.array_tail.as_ref() {
+                    g::ArrayTail::SemicolonExpr(x) => {
+                        ExprKind::Repeat(Box::new(first), Box::new(expr(&x.expr)?))
+                    }
+                    g::ArrayTail::ArrayTailList(x) => {
+                        let mut values = vec![first];
+                        values.extend(
+                            x.array_tail_list
+                                .iter()
+                                .map(|x| expr(&x.expr))
+                                .collect::<Result<Vec<_>, _>>()?,
+                        );
+                        ExprKind::Array(values)
+                    }
+                }
+            } else {
+                ExprKind::Array(vec![])
+            };
+            Expr {
+                kind,
+                span: Span::token(&x.array.l_bracket),
+            }
+        }
         g::Primary::LParenExprRParen(x) => return expr(&x.expr),
         g::Primary::IdentifierPrimaryOpt(x) => {
             let n = name(&x.identifier);
