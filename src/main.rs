@@ -50,8 +50,12 @@ fn run() -> Result<(), String> {
     }
     let text = std::fs::read_to_string(&file).map_err(|e| format!("{file}: {e}"))?;
     let core = parse(CORE, "<stdlib/core.rusk>")?;
+    let collections = parse(
+        include_str!("../lib/collections.rusk"),
+        "<stdlib/collections.rusk>",
+    )?;
     let source = parse(&text, &file)?;
-    let cpp = compiler::Compiler::default().compile(&[core, source])?;
+    let cpp = compiler::Compiler::default().compile(&[core, collections, source])?;
     std::fs::write(&output, cpp).map_err(|e| format!("{output}: {e}"))?;
     Ok(())
 }

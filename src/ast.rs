@@ -48,6 +48,8 @@ pub enum ExprKind {
     Literal(String, String),
     Array(Vec<Expr>),
     Repeat(Box<Expr>, Box<Expr>),
+    Range(Box<Expr>, Box<Expr>),
+    Logical(String, Box<Expr>, Box<Expr>),
     Index(Box<Expr>, Box<Expr>),
     Var(Name),
     Call(Name, Vec<Expr>),
@@ -68,11 +70,12 @@ pub enum Stmt {
     Return(Span, Option<Expr>),
     Symbol(Name, BTreeMap<String, String>),
     Let(Name, Option<Name>, Option<Expr>),
-    Input(Vec<(Name, Name)>),
+    Input(Vec<(Name, Name, Vec<Expr>)>),
     Output(Vec<Expr>),
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
     While(Expr, Box<Stmt>, Option<Box<Stmt>>),
+    For(Name, Expr, Box<Stmt>, Option<Box<Stmt>>),
     Loop(Box<Stmt>),
     Break(Span),
     Continue(Span),
@@ -170,12 +173,17 @@ fn stmt(s: &g::Statement<'_>) -> Result<Stmt, String> {
                 .chain(x.input.input_list.iter().map(|i| i.input_item.as_ref()))
             {
                 let ty = type_name(&item.type_name);
-                items.push((name(&item.identifier), ty.clone()));
-                items.extend(
-                    item.input_item_list
-                        .iter()
-                        .map(|i| (name(&i.identifier), ty.clone())),
-                );
+                for item in std::iter::once(item.input_name.as_ref())
+                    .chain(item.input_item_list.iter().map(|i| i.input_name.as_ref()))
+                {
+                    let args = item
+                        .input_name_opt
+                        .as_ref()
+                        .map(|x| list(&x.expr_list))
+                        .transpose()?
+                        .unwrap_or_default();
+                    items.push((name(&item.identifier), ty.clone(), args));
+                }
             }
             Stmt::Input(items)
         }
@@ -186,6 +194,16 @@ fn stmt(s: &g::Statement<'_>) -> Result<Stmt, String> {
             Box::new(block(&x.r#if.block)?),
             x.r#if
                 .if_opt
+                .as_ref()
+                .map(|x| block(&x.block).map(Box::new))
+                .transpose()?,
+        ),
+        g::Statement::For(x) => Stmt::For(
+            name(&x.r#for.identifier),
+            expr(&x.r#for.expr)?,
+            Box::new(block(&x.r#for.block)?),
+            x.r#for
+                .for_opt
                 .as_ref()
                 .map(|x| block(&x.block).map(Box::new))
                 .transpose()?,
@@ -223,7 +241,7 @@ fn list(l: &g::ExprList<'_>) -> Result<Vec<Expr>, String> {
         .collect()
 }
 fn expr(e: &g::Expr<'_>) -> Result<Expr, String> {
-    let left = compare(&e.compare)?;
+    let left = range(&e.range)?;
     if let Some(x) = &e.expr_opt {
         let (op, t) = match x.assign_op.as_ref() {
             g::AssignOp::ColonEqu(x) => (":=", &x.colon_equ),
@@ -238,6 +256,48 @@ fn expr(e: &g::Expr<'_>) -> Result<Expr, String> {
             kind: ExprKind::Assign(op.into(), Box::new(left), Box::new(expr(&x.expr)?)),
             span: Span::token(t),
         });
+    }
+    Ok(left)
+}
+fn range(e: &g::Range<'_>) -> Result<Expr, String> {
+    let left = logical_or(&e.logical_or)?;
+    if let Some(right) = &e.range_opt {
+        let span = left.span.clone();
+        Ok(Expr {
+            kind: ExprKind::Range(Box::new(left), Box::new(logical_or(&right.logical_or)?)),
+            span,
+        })
+    } else {
+        Ok(left)
+    }
+}
+fn logical_or(e: &g::LogicalOr<'_>) -> Result<Expr, String> {
+    let mut left = logical_and(&e.logical_and)?;
+    for right in &e.logical_or_list {
+        let span = left.span.clone();
+        left = Expr {
+            kind: ExprKind::Logical(
+                "||".into(),
+                Box::new(left),
+                Box::new(logical_and(&right.logical_and)?),
+            ),
+            span,
+        };
+    }
+    Ok(left)
+}
+fn logical_and(e: &g::LogicalAnd<'_>) -> Result<Expr, String> {
+    let mut left = compare(&e.compare)?;
+    for right in &e.logical_and_list {
+        let span = left.span.clone();
+        left = Expr {
+            kind: ExprKind::Logical(
+                "&&".into(),
+                Box::new(left),
+                Box::new(compare(&right.compare)?),
+            ),
+            span,
+        };
     }
     Ok(left)
 }
@@ -294,6 +354,7 @@ fn unary(e: &g::Unary<'_>) -> Result<Expr, String> {
             let (op, t) = match x.unary_op.as_ref() {
                 g::UnaryOp::Plus(x) => ("+", &x.plus),
                 g::UnaryOp::Minus(x) => ("-", &x.minus),
+                g::UnaryOp::Bang(x) => ("!", &x.bang),
             };
             Ok(Expr {
                 kind: ExprKind::Unary(op.into(), Box::new(unary(&x.unary)?)),

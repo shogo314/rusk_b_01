@@ -46,6 +46,9 @@ impl Case {
             "{}",
             String::from_utf8_lossy(&native.stderr)
         );
+        self.execute(input)
+    }
+    fn execute(&self, input: &str) -> Output {
         let mut child = Command::new(self.0.join("main"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -406,9 +409,9 @@ b[0]=5; wt a,b;
 fn invalid_arrays_are_rejected_by_rusk() {
     for source in [
         "let a := [];",
-        "let a:Vec<Bool> := [true];",
+        "let a:Vec<Missing> := [];",
         "let a := [1,true];",
-        "let a := [[1]];",
+        "let a := [[],[1]];",
         "let a := [1]; wt a[true];",
         "let a := [1]; a[0]:=false;",
         "let a := [1]; push_back(a,false);",
@@ -448,6 +451,7 @@ fn reverse_array_example() {
 fn empty_arrays_use_parameter_context_and_concrete_external_types() {
     succeeds(
         r#"
+fn empty_size(a: Vec<Int>) -> Int { return a.len(); }
 extern fn first(a: Vec<Int>) -> Int {
     cpp_name: "first_vec_int",
     code: "Obj<std::int64_t> first_vec_int(Obj<IntVec> a, Loc loc) { return (*a)[vec_int_index(*a, 0, loc)]; }",
@@ -455,7 +459,7 @@ extern fn first(a: Vec<Int>) -> Int {
 let a: Vec<Int> := [];
 push_back(a,1);
 first(a)=2;
-wt len([]),a;
+wt empty_size([]),a;
 __assign__(a,[]);
 wt len(a);
 "#,
@@ -511,7 +515,7 @@ wt value.__add__(2), value;
 #[test]
 fn invalid_repetition_and_method_calls_are_located() {
     for source in [
-        "let a := [true;3];",
+        "let a := [0;true];",
         "let a := [1;false];",
         "[1].missing();",
         "[1].len(2);",
@@ -683,5 +687,535 @@ wt choose(true),choose(false),choose_other(true),choose_other(false);
 "#,
         "",
         "1 2 3 4\n",
+    );
+}
+
+#[test]
+fn prototype_multidimensional_vectors_and_basic_element_types() {
+    succeeds(
+        r#"
+let grid := [[0;3];2];
+grid[0][1]=7; wt grid;
+let independent:=copy(grid); grid[0][1]=8; wt independent;
+let alias:=grid[0]; grid=[[9]]; wt grid,alias;
+let flags := [true,false]; wt flags, !flags;
+let words := ["b","a"]; words.sort(); wt words,words.contains("a");
+let letters := ['b','a']; letters.sort(); wt letters;
+let nested := [[2],[1,3],[1,2]]; nested.sort(); wt nested;
+wt nested==[[1,2],[1,3],[2]];
+"#,
+        "",
+        "0 7 0 0 0 0\n0 7 0 0 0 0\n9 0 8 0\nYes No No\na b Yes\na b\n1 2 1 3 2\nYes\n",
+    );
+}
+
+#[test]
+fn prototype_for_ranges_and_arrays_preserve_progress_and_sharing() {
+    succeeds(
+        r#"
+let saved:Vec<Int>:=[];
+let end:=3;
+for i in 0..end { saved.push_back(i); i=99; end=0; }
+wt saved;
+let a:Vec<Int>:=[];
+for i in 0..3 { a.push_back(i); i:=10; }
+wt a;
+for x in a { x+=1; } wt a;
+for row in [[1],[2]] { row[0]+=10; wt row; }
+let total:=0;
+for i in 0..5 { if i==2 { continue; } total+=i; } else { wt total; }
+for i in 0..3 { break; } else { wt "wrong"; }
+for i in 3..0 { wt "wrong"; } else { wt "empty"; }
+for i in 9223372036854775806..9223372036854775807 { wt i; }
+"#,
+        "",
+        "99 99 99\n0 1 2\n1 2 3\n11\n12\n8\nempty\n9223372036854775806\n",
+    );
+}
+
+#[test]
+fn prototype_short_circuit_and_typed_input() {
+    succeeds(
+        r#"
+in n:Int;
+in a(n):Vec<Int>;
+in flag:Bool;
+wt a,flag;
+let x:=0;
+wt false && (x=1), true || (x=2),x;
+wt !(0),!"", (1<2 && 2<3) || false;
+"#,
+        "3 1 2 3 Yes",
+        "1 2 3 Yes\nNo Yes 0\nYes Yes Yes\n",
+    );
+}
+
+#[test]
+fn prototype_strings_and_explicit_conversions() {
+    succeeds(
+        r#"
+let s:="abc";
+s[1]='z'; wt s,s[-1];
+{ let c:=s[0]; c='A'; }
+s.push_back('d'); s+="ef"; wt s,s.len(),s.contains("ze");
+if s[0]=='A' { s.push_back('!'); }
+wt s;
+wt Int('A'),Char(66),Int(true),Bool(0),Str(123),Str('x'),Int("-12");
+wt 'c'-'a','a'+2,'c'-2;
+let detached:=s.copy(); detached[0]='x'; wt s,detached;
+"#,
+        "",
+        "azc c\nAzcdef 6 No\nAzcdef!\n65 B 1 No 123 x -12\n2 c a\nAzcdef! xzcdef!\n",
+    );
+}
+
+#[test]
+fn prototype_sort_search_and_concatenation() {
+    succeeds(
+        r#"
+let x:=3; let a:=[x,1,2,2]; let b:=a.sorted();
+wt a,b,b.bisect_left(2),b.bisect_right(2),b.contains(9);
+b[3]=7; wt x;
+a.sort(); wt a; a.reverse(); wt a;
+let c:=a+[8]; c[0]=9; wt a,c;
+a+=a; wt a.len();
+"#,
+        "",
+        "3 1 2 2 1 2 2 3 1 3 No\n7\n1 2 2 7\n7 2 2 1\n9 2 2 1 9 2 2 1 8\n8\n",
+    );
+}
+
+#[test]
+fn prototype_mutation_and_type_errors_are_diagnosed() {
+    for (source, message) in [
+        (
+            "let a:=[1]; for x in a { a.push_back(2); }",
+            "container changed during iteration",
+        ),
+        (
+            "let a:=[1,2]; for x in a { a.sort(); }",
+            "container changed during iteration",
+        ),
+        (
+            "let s:=\"abc\"; let c:=s[0]; s.push_back('x');",
+            "active character references",
+        ),
+        (
+            "let s:=\"abc\"; let c:=s[0]; s=\"longer\";",
+            "active character references",
+        ),
+        ("wt Char(128);", "ASCII range"),
+        ("wt 'a'+100;", "ASCII range"),
+        ("wt Int(\"12x\");", "integer conversion"),
+        ("in a(-1):Vec<Int>;", "negative array length"),
+    ] {
+        let out = Case::new(source).run("");
+        assert!(!out.status.success(), "{source}");
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(error.contains(message), "{source}: {error}");
+        assert!(error.contains("main.rusk:"), "{error}");
+    }
+    for source in [
+        "for x in 3 {}",
+        "let s:=\"a\"; s[0]:='x';",
+        "let x:Int; true || (x:=1); wt x;",
+        "in a(3):Vec<Vec<Int>>;",
+    ] {
+        let out = Case::new(source).compile();
+        assert!(!out.status.success(), "{source}");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("main.rusk:"));
+    }
+}
+
+#[test]
+fn prototype_competitive_programming_examples() {
+    succeeds(
+        include_str!("../examples/prototype/array_sum.rusk"),
+        "5 1 -2 3 4 5",
+        "11\n",
+    );
+    succeeds(
+        include_str!("../examples/prototype/sort_search.rusk"),
+        "5 4 3 1 3 2 5 0 2 3 9",
+        "0\n2\n4\n5\n",
+    );
+    succeeds(
+        include_str!("../examples/prototype/grid_bfs.rusk"),
+        "3 4\n....\n.##.\n....\n",
+        "5\n",
+    );
+    succeeds(
+        include_str!("../examples/prototype/pow_mod.rusk"),
+        "3 13 1000",
+        "323\n",
+    );
+}
+
+#[test]
+fn prototype_grid_bfs_matches_an_independent_oracle() {
+    use std::collections::VecDeque;
+    let case = Case::new(include_str!("../examples/prototype/grid_bfs.rusk"));
+    let built = case.run("1 1\n.\n");
+    assert!(built.status.success());
+    let mut seed = 7u64;
+    for _ in 0..30 {
+        let h = 6;
+        let w = 7;
+        let mut grid = vec![vec![b'.'; w]; h];
+        for row in &mut grid {
+            for c in row {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                if seed >> 61 == 0 {
+                    *c = b'#';
+                }
+            }
+        }
+        let mut distance = vec![vec![-1; w]; h];
+        let mut queue = VecDeque::new();
+        if grid[0][0] == b'.' {
+            distance[0][0] = 0;
+            queue.push_back((0, 0));
+        }
+        while let Some((r, c)) = queue.pop_front() {
+            for (dr, dc) in [(1isize, 0isize), (-1, 0), (0, 1), (0, -1)] {
+                let nr = r as isize + dr;
+                let nc = c as isize + dc;
+                if nr >= 0 && nr < h as isize && nc >= 0 && nc < w as isize {
+                    let nr = nr as usize;
+                    let nc = nc as usize;
+                    if grid[nr][nc] == b'.' && distance[nr][nc] < 0 {
+                        distance[nr][nc] = distance[r][c] + 1;
+                        queue.push_back((nr, nc));
+                    }
+                }
+            }
+        }
+        let rows = grid
+            .iter()
+            .map(|r| String::from_utf8(r.clone()).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out = case.execute(&format!("{h} {w}\n{rows}\n"));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            format!("{}\n", distance[h - 1][w - 1])
+        );
+    }
+}
+
+#[test]
+fn prototype_sort_search_matches_linear_counting() {
+    let case = Case::new(include_str!("../examples/prototype/sort_search.rusk"));
+    let built = case.run("0 1 10");
+    assert!(built.status.success());
+    let mut seed = 19u64;
+    for size in [0, 1, 2, 15, 80] {
+        let mut values = vec![];
+        for _ in 0..size {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            values.push(((seed >> 32) % 31) as i64 - 15);
+        }
+        let queries: Vec<_> = (-20..=20).collect();
+        let expected = queries
+            .iter()
+            .map(|q| format!("{}\n", values.iter().filter(|v| *v <= q).count()))
+            .collect::<String>();
+        let input = format!(
+            "{} {} {} {}",
+            values.len(),
+            queries.len(),
+            values
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" "),
+            queries
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let out = case.execute(&input);
+        assert!(out.status.success());
+        assert_eq!(out.stdout, expected.as_bytes());
+    }
+}
+
+#[test]
+fn prototype_convenience_operations_and_temporary_borrows() {
+    succeeds(
+        r#"
+wt Int(),Bool(),Char("A"),Str(),Str(['a','b']),Bool([1]);
+let initial:=10; wt [1,2].sum(initial),initial,sum([]);
+fn append(s: Str) -> Bool { s.push_back('!'); return true; }
+let s:="abc";
+if s[0]=='a' && append(s) { wt s; }
+let grid:Vec<Vec<Bool>> := [[false;2];2];
+grid[0][0]=true; wt grid;
+let empty_rows:Vec<Vec<Int>> := [[];2];
+empty_rows[0].push_back(1); wt empty_rows[0],empty_rows[1].len();
+"#,
+        "",
+        "0 No A  ab Yes\n13 10 0\nabc!\nYes No No No\n1 0\n",
+    );
+    let out = Case::new("wt [9223372036854775807,1,-1].sum();").run("");
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("integer overflow"));
+}
+
+#[test]
+fn sharing_matches_an_independent_object_model() {
+    let case = Case::new(
+        r#"
+let slots := [0;8];
+in n:Int;
+for i in 0..n {
+    in op,a,b,value:Int;
+    if op==0 { slots[a]:=value; }
+    if op==1 { slots[a]=value; }
+    if op==2 { slots[a]:=slots[b]; }
+    if op==3 { slots[a]+=value; }
+    if op==4 { slots[a]:=copy(slots[b]); }
+    wt slots;
+}
+"#,
+    );
+    let mut objects = vec![0i64; 8];
+    let mut slots: Vec<usize> = (0..8).collect();
+    let mut input = String::from("300\n");
+    let mut expected = String::new();
+    let mut seed = 314u64;
+    for _ in 0..300 {
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            seed >> 32
+        };
+        let op = next() % 5;
+        let a = (next() % 8) as usize;
+        let b = (next() % 8) as usize;
+        let value = (next() % 21) as i64 - 10;
+        input.push_str(&format!("{op} {a} {b} {value}\n"));
+        match op {
+            0 | 4 => {
+                let new_value = if op == 0 { value } else { objects[slots[b]] };
+                slots[a] = objects.len();
+                objects.push(new_value);
+            }
+            1 => objects[slots[a]] = value,
+            2 => slots[a] = slots[b],
+            3 => objects[slots[a]] += value,
+            _ => unreachable!(),
+        }
+        expected.push_str(
+            &slots
+                .iter()
+                .map(|&id| objects[id].to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        expected.push('\n');
+    }
+    let out = case.run(&input);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, expected.as_bytes());
+}
+
+#[test]
+fn nested_copy_breaks_internal_aliases_and_preserves_old_references() {
+    succeeds(
+        r#"
+let x:=1; let row:=[x,x]; let grid:=[row,row];
+let detached:=copy(grid);
+detached[0][0]=7;
+wt grid,detached;
+let old_row:=grid[0]; let old_cell:=grid[0][0];
+grid=grid;
+grid[0][0]=8;
+wt grid,old_row,old_cell;
+let repeated:=[row;2]; repeated[0][0]=9;
+wt repeated,row;
+"#,
+        "",
+        "1 1 1 1 7 1 1 1\n8 1 1 1 1 1 1\n9 1 1 1 1 1\n",
+    );
+}
+
+#[test]
+fn character_references_escape_owners_and_release_after_rebinding() {
+    succeeds(
+        r#"
+fn escaped() -> Char { let local:="abc"; return local[1]; }
+let c:=escaped(); c='Z'; wt c;
+let s:="abc"; let owner:=s;
+let first:=s[0]; let alias:=first;
+s:="other"; owner="XYZ"; wt first,alias,s;
+first:='q'; alias:='r';
+owner.push_back('!'); wt owner,first,alias;
+let detached:=copy(owner[0]); owner.push_back('?'); wt detached,owner;
+"#,
+        "",
+        "Z\nX X other\nXYZ! q r\nX XYZ!?\n",
+    );
+}
+
+#[test]
+fn character_borrows_survive_aliases_and_function_returns() {
+    for source in [
+        "let s:=\"abc\"; let c:=s[0]; let d:=c; c:='x'; s.push_back('!');",
+        "fn first(s:Str)->Char { return s[0]; } let s:=\"abc\"; let c:=first(s); s+=\"!\";",
+        "let s:=\"abc\"; let chars:=[s[0]]; s=\"x\";",
+    ] {
+        let out = Case::new(source).run("");
+        assert_eq!(out.status.code(), Some(1), "{source}");
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            error.contains("active character references"),
+            "{source}: {error}"
+        );
+        assert!(error.contains("main.rusk:1:"), "{error}");
+    }
+}
+
+#[test]
+fn temporary_character_borrows_release_on_control_flow_exits() {
+    succeeds(
+        r#"
+fn first(s:Str)->Char { return s[0]; }
+fn touch(s:Str) { let c:=s[0]; c='A'; return; }
+let s:="a";
+while s[0]=='a' { s.push_back('!'); s[0]='b'; continue; }
+if first(s)=='b' { s.push_back('?'); }
+for i in 0..3 { let c:=s[0]; if i==1 { break; } continue; }
+s.push_back('.');
+touch(s); s.push_back('#'); wt s;
+let t:="a";
+wt false && (t[0]=='a'), true || (t[0]=='a');
+t.push_back('!'); wt t;
+"#,
+        "",
+        "A!?.#\nNo Yes\na!\n",
+    );
+}
+
+#[test]
+fn iterators_detect_structural_changes_through_aliases() {
+    for mutation in [
+        "alias.reverse();",
+        "alias += [3];",
+        "alias=[4];",
+        "alias=alias;",
+    ] {
+        let source = format!("let a:=[1,2]; let alias:=a; for x in a {{ {mutation} }}");
+        let out = Case::new(&source).run("");
+        assert_eq!(out.status.code(), Some(1), "{source}");
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            error.contains("container changed during iteration"),
+            "{source}: {error}"
+        );
+        assert!(error.contains("main.rusk:1:"), "{error}");
+    }
+}
+
+#[test]
+fn iterators_keep_original_owner_and_observe_element_rebinding() {
+    succeeds(
+        r#"
+let a:=[1,2,3]; let original:=a; let seen:Vec<Int>:=[];
+for x in a {
+    seen.push_back(x);
+    if x==1 { a:=[9]; original[1]:=7; }
+}
+wt seen,a,original;
+let outer:=0;
+for i in 0..2 {
+    for j in 0..2 { break; } else { wt "wrong"; }
+    outer+=1;
+} else { wt outer; }
+"#,
+        "",
+        "1 7 3 9 1 7 3\n2\n",
+    );
+}
+
+#[test]
+fn integer_division_matches_floor_identity_for_all_small_sign_combinations() {
+    let case = Case::new("in n:Int; for i in 0..n { in a,b:Int; wt a/b,a%b; }");
+    let mut pairs = vec![];
+    for a in -12i64..=12 {
+        for b in -7i64..=7 {
+            if b != 0 {
+                pairs.push((a, b));
+            }
+        }
+    }
+    let mut input = format!("{}\n", pairs.len());
+    let mut expected = String::new();
+    for (a, b) in pairs {
+        // Find floor(a/b) by its defining inequalities, without division.
+        let q = (-12..=12)
+            .find(|&q| {
+                if b > 0 {
+                    q * b <= a && a < (q + 1) * b
+                } else {
+                    q * b >= a && a > (q + 1) * b
+                }
+            })
+            .unwrap();
+        input.push_str(&format!("{a} {b}\n"));
+        expected.push_str(&format!("{q} {}\n", a - b * q));
+    }
+    let out = case.run(&input);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, expected.as_bytes());
+}
+
+#[test]
+fn objects_release_when_the_last_owner_leaves_scope() {
+    succeeds(
+        r#"
+extern symbol lifetime_observer {
+    code: "std::vector<std::weak_ptr<std::int64_t>> observed;",
+}
+extern fn watch(x:Int) {
+    cpp_name: "watch_object",
+    code: "void watch_object(Obj<std::int64_t> x, Loc) { observed.push_back(x); }",
+}
+extern fn living() -> Int {
+    cpp_name: "living_objects",
+    code: "Obj<std::int64_t> living_objects(Loc) { std::int64_t n=0; for (const auto& x:observed) if(!x.expired()) ++n; return make_obj<std::int64_t>(n); }",
+}
+fn make() -> Int { let x:=5; watch(x); return x; }
+fn early() { let x:=6; watch(x); return; }
+watch(1+2); wt living();
+{
+    let a:=make(); let b:=a;
+    a:=0; wt living();
+    b:=0; wt living();
+}
+let held:Vec<Int>:=[];
+{ let x:=7; watch(x); held.push_back(x); }
+wt living(); held=[]; wt living();
+early(); wt living();
+for i in 0..3 { watch(i); continue; }
+wt living();
+loop { let x:=8; watch(x); break; }
+wt living();
+"#,
+        "",
+        "0\n1\n0\n1\n0\n0\n0\n0\n",
     );
 }

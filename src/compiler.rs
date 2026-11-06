@@ -32,6 +32,7 @@ pub struct Compiler {
     used: BTreeSet<usize>,
     loops: Vec<Option<String>>,
     return_type: Option<String>,
+    pending_temps: Vec<String>,
 }
 fn quoted(s: &str) -> String {
     let mut out = String::from("\"");
@@ -116,7 +117,7 @@ impl Compiler {
                         if let Some(old) = self.functions.iter().find(|f| {
                             f.name.text == n.text
                                 && f.params == params
-                                && (n.text != "__read__" || f.result == result)
+                                && (!return_selected(&n.text) || f.result == result)
                         }) {
                             return Err(n.span.error(format!(
                                 "duplicate function; previous definition at {}:{}:{}",
@@ -241,12 +242,60 @@ impl Compiler {
         self.return_type = None;
         Ok(())
     }
-    fn check_type(&self, n: &Name) -> Result<(), String> {
+    fn check_type(&mut self, n: &Name) -> Result<(), String> {
         if self.types.contains_key(&n.text) {
+            Ok(())
+        } else if let Some(inner) = vector_element(&n.text) {
+            let inner = inner.to_string();
+            if !matches!(inner.as_str(), "Int" | "Bool" | "Char" | "Str")
+                && vector_element(&inner).is_none()
+            {
+                return Err(n
+                    .span
+                    .error("prototype vectors require basic or vector element types"));
+            }
+            self.check_type(&Name {
+                text: inner.clone(),
+                span: n.span.clone(),
+            })?;
+            self.specialize_vector(&n.text, &inner)?;
             Ok(())
         } else {
             Err(n.span.error(format!("unknown type '{}'", n.text)))
         }
+    }
+    fn specialize_vector(&mut self, ty: &str, inner: &str) -> Result<(), String> {
+        let native_element = self.types[inner].clone();
+        let native = format!("RuskVec<{native_element}>");
+        let iterator = format!("Iter<{ty}>");
+        let native_iterator = format!("RuskIter<{native_element}>");
+        self.types.insert(ty.into(), native.clone());
+        self.types.insert(iterator.clone(), native_iterator.clone());
+        let prefix = format!("vector_{}_", self.functions.len());
+        let source = include_str!("../lib/vec.rusk")
+            .replace("NativeIterator", &native_iterator)
+            .replace("NativeElement", &native_element)
+            .replace("NativeVec", &native)
+            .replace("Iterator", &iterator)
+            .replace("Element", inner)
+            .replace("Vector", ty)
+            .replace("vector_function_", &prefix);
+        for statement in crate::parse(&source, "<stdlib/vec.rusk>")? {
+            if let Stmt::Function(name, params, result, properties) = statement {
+                if name.text == "__read__" && vector_element(inner).is_some() {
+                    continue;
+                }
+                self.functions.push(Function {
+                    cpp: property(&name, &properties, "cpp_name")?,
+                    code: property(&name, &properties, "code")?,
+                    name,
+                    params: params.into_iter().map(|(_, ty)| ty.text).collect(),
+                    result: result.map_or("Unit".into(), |ty| ty.text),
+                    body: None,
+                });
+            }
+        }
+        Ok(())
     }
     fn temp(&mut self) -> String {
         let r = format!("rusk_v{}", self.counter);
@@ -256,6 +305,7 @@ impl Compiler {
     fn emit(&mut self, ty: &str, code: String) -> Value {
         let cpp = self.temp();
         self.body.push_str(&format!("auto {cpp} = {code};\n"));
+        self.pending_temps.push(cpp.clone());
         Value { cpp, ty: ty.into() }
     }
     fn find_var(&self, n: &Name) -> Result<Variable, String> {
@@ -313,7 +363,7 @@ impl Compiler {
             .filter(|(_, f)| {
                 f.name.text == name
                     && f.params == args.iter().map(|v| v.ty.clone()).collect::<Vec<_>>()
-                    && (name != "__read__" || expected.is_none_or(|t| f.result == t))
+                    && (!return_selected(name) || expected.is_none_or(|t| f.result == t))
             })
             .map(|(i, _)| i)
             .collect();
@@ -399,7 +449,19 @@ impl Compiler {
         };
         Ok(self.emit(ty, format!("make_obj<{cpp}>({value})")))
     }
+    fn release_temps(&mut self) {
+        for temp in self.pending_temps.drain(..) {
+            self.body.push_str(&format!("{temp}.reset();\n"));
+        }
+    }
     fn statement(&mut self, s: &Stmt) -> Result<(), String> {
+        let outer = std::mem::take(&mut self.pending_temps);
+        self.statement_inner(s)?;
+        self.release_temps();
+        self.pending_temps = outer;
+        Ok(())
+    }
+    fn statement_inner(&mut self, s: &Stmt) -> Result<(), String> {
         match s {
             Stmt::Type(n, _)
             | Stmt::Function(n, ..)
@@ -445,9 +507,13 @@ impl Compiler {
                 self.declare(n, ty, value)?;
             }
             Stmt::Input(items) => {
-                for (n, t) in items {
+                for (n, t, args) in items {
                     self.check_type(t)?;
-                    let v = self.call("__read__", vec![], Some(&t.text), &n.span)?;
+                    let mut values = vec![];
+                    for arg in args {
+                        values.push(self.expr(arg, Some("Int"))?);
+                    }
+                    let v = self.call("__read__", values, Some(&t.text), &n.span)?;
                     self.declare(n, t.text.clone(), Some(v))?;
                 }
             }
@@ -494,16 +560,59 @@ impl Compiler {
                     self.body.push_str(&format!("bool {flag} = false;\n"));
                 }
                 self.body.push_str("while (true) {\n");
+                let outer_temps = std::mem::take(&mut self.pending_temps);
                 let value = self.condition(cond)?;
                 let before_body = self.scopes.clone();
                 self.body
                     .push_str(&format!("if (!*{}) break;\n", value.cpp));
+                self.release_temps();
+                self.pending_temps = outer_temps;
                 self.loops.push(broken.clone());
                 self.statement(body)?;
                 self.loops.pop();
                 self.body.push_str("}\n");
                 // The body may execute zero times. The first condition always executes.
                 self.scopes = before_body;
+                if let Some(otherwise) = otherwise {
+                    let before_else = self.scopes.clone();
+                    self.body
+                        .push_str(&format!("if (!{}) {{\n", broken.unwrap()));
+                    self.statement(otherwise)?;
+                    self.body.push_str("}\n");
+                    self.scopes = before_else;
+                }
+            }
+            Stmt::For(name, source, body, otherwise) => {
+                let source = self.expr(source, None)?;
+                let iterator = self.call("__iter__", vec![source], None, &name.span)?;
+                let before = self.scopes.clone();
+                let broken = otherwise.as_ref().map(|_| self.temp());
+                if let Some(flag) = &broken {
+                    self.body.push_str(&format!("bool {flag}=false;\n"));
+                }
+                self.body.push_str("while (true) {\n");
+                // Loop-local temporaries must be destroyed before their C++ scope ends.
+                let outer_temps = std::mem::take(&mut self.pending_temps);
+                let has_next = self.call(
+                    "__iter_has_next__",
+                    vec![iterator.clone()],
+                    None,
+                    &name.span,
+                )?;
+                self.same("Bool", &has_next.ty, &name.span)?;
+                self.body
+                    .push_str(&format!("if (!*{}) break;\n", has_next.cpp));
+                self.scopes.push(BTreeMap::new());
+                let value = self.call("__iter_next__", vec![iterator], None, &name.span)?;
+                self.declare(name, value.ty.clone(), Some(value))?;
+                self.release_temps();
+                self.loops.push(broken.clone());
+                self.statement(body)?;
+                self.loops.pop();
+                self.scopes.pop();
+                self.pending_temps = outer_temps;
+                self.body.push_str("}\n");
+                self.scopes = before;
                 if let Some(otherwise) = otherwise {
                     let before_else = self.scopes.clone();
                     self.body
@@ -559,9 +668,14 @@ impl Compiler {
         Ok(())
     }
     fn condition(&mut self, expr: &Expr) -> Result<Value, String> {
+        let outer = std::mem::take(&mut self.pending_temps);
         let value = self.expr(expr, None)?;
         let result = self.call("__bool__", vec![value], None, &expr.span)?;
         self.same("Bool", &result.ty, &expr.span)?;
+        self.pending_temps.retain(|name| name != &result.cpp);
+        self.release_temps();
+        self.pending_temps = outer;
+        self.pending_temps.push(result.cpp.clone());
         Ok(result)
     }
     fn intersect_initialization(&mut self, other: &[BTreeMap<String, Variable>]) {
@@ -575,28 +689,69 @@ impl Compiler {
         match &e.kind {
             ExprKind::Literal(ty, text) => self.literal(ty, text, &e.span),
             ExprKind::Array(items) => {
-                if items.is_empty() && expected != Some("Vec<Int>") {
-                    return Err(e
-                        .span
-                        .error("empty array requires a Vec<Int> type annotation"));
-                }
-                let array = self.call("__vec_int__", vec![], None, &e.span)?;
+                let hint = expected.and_then(vector_element);
+                let mut values = vec![];
                 for item in items {
-                    let value = self.expr(item, Some("Int"))?;
-                    self.same("Int", &value.ty, &item.span)?;
-                    self.call("push_back", vec![array.clone(), value], None, &item.span)?;
+                    values.push(self.expr(item, hint)?);
+                }
+                let element = values
+                    .first()
+                    .map(|v| v.ty.as_str())
+                    .or(hint)
+                    .ok_or_else(|| e.span.error("empty array requires a vector type context"))?
+                    .to_string();
+                for value in &values {
+                    self.same(&element, &value.ty, &e.span)?;
+                }
+                let ty = format!("Vec<{element}>");
+                self.check_type(&Name {
+                    text: ty.clone(),
+                    span: e.span.clone(),
+                })?;
+                let array = self.call("__vec_new__", vec![], Some(&ty), &e.span)?;
+                for value in values {
+                    self.call("push_back", vec![array.clone(), value], None, &e.span)?;
                 }
                 Ok(array)
             }
             ExprKind::Repeat(initial, count) => {
-                let initial = self.expr(initial, Some("Int"))?;
+                let initial = self.expr(initial, expected.and_then(vector_element))?;
+                let ty = format!("Vec<{}>", initial.ty);
+                self.check_type(&Name {
+                    text: ty.clone(),
+                    span: e.span.clone(),
+                })?;
                 let count = self.expr(count, Some("Int"))?;
-                self.call("__vec_repeat_int__", vec![initial, count], None, &e.span)
+                self.call("__vec_repeat__", vec![initial, count], Some(&ty), &e.span)
             }
             ExprKind::Index(array, index) => {
                 let array = self.expr(array, None)?;
                 let index = self.expr(index, Some("Int"))?;
                 self.call("__getitem__", vec![array, index], None, &e.span)
+            }
+            ExprKind::Range(start, end) => {
+                let start = self.expr(start, Some("Int"))?;
+                let end = self.expr(end, Some("Int"))?;
+                self.call("__range__", vec![start, end], None, &e.span)
+            }
+            ExprKind::Logical(op, left, right) => {
+                let left = self.condition(left)?;
+                let result = self.emit("Bool", format!("make_obj<bool>(*{})", left.cpp));
+                let before = self.scopes.clone();
+                self.body.push_str(&format!(
+                    "if ({}*{}) {{\n",
+                    if op == "||" { "!" } else { "" },
+                    left.cpp
+                ));
+                let outer_temps = std::mem::take(&mut self.pending_temps);
+                let right = self.condition(right)?;
+                self.body
+                    .push_str(&format!("*{}=*{};\n", result.cpp, right.cpp));
+                self.release_temps();
+                self.pending_temps = outer_temps;
+                self.body.push_str("}\n");
+                self.scopes = before;
+                Ok(result)
             }
             ExprKind::Var(n) => {
                 let v = self.find_var(n)?;
@@ -647,7 +802,11 @@ impl Compiler {
                 }
                 let x = self.expr(x, None)?;
                 self.call(
-                    if op == "-" { "__neg__" } else { "__pos__" },
+                    match op.as_str() {
+                        "-" => "__neg__",
+                        "!" => "__not__",
+                        _ => "__pos__",
+                    },
                     vec![x],
                     None,
                     &e.span,
@@ -658,7 +817,8 @@ impl Compiler {
                     if let ExprKind::Index(array, index) = &left.kind {
                         let array = self.expr(array, None)?;
                         let index = self.expr(index, Some("Int"))?;
-                        let rhs = self.expr(right, Some("Int"))?;
+                        let element = vector_element(&array.ty).map(str::to_string);
+                        let rhs = self.expr(right, element.as_deref())?;
                         return self.call("__setitem__", vec![array, index, rhs], None, &e.span);
                     }
                     let ExprKind::Var(n) = &left.kind else {
@@ -729,4 +889,11 @@ fn definitely_returns(statement: &Stmt) -> bool {
         Stmt::If(_, yes, Some(no)) => definitely_returns(yes) && definitely_returns(no),
         _ => false,
     }
+}
+
+fn vector_element(ty: &str) -> Option<&str> {
+    ty.strip_prefix("Vec<")?.strip_suffix('>')
+}
+fn return_selected(name: &str) -> bool {
+    matches!(name, "__read__" | "__vec_new__" | "__vec_repeat__")
 }
