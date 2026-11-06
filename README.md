@@ -12,6 +12,10 @@ Rust と Parol で、競技プログラミングの基本問題を記述でき�
 
 プロトタイプの対象範囲と検証手順は [開発ガイド](docs/development/index.md) を参照してください。一般のジェネリクス、ローカル関数、浮動小数点、辞書・集合などは未実装で、実行速度の最適化も今後の課題です。設計ノートには検討中・保留中の案も含まれます。
 
+[AtCoderの解答例](examples/atcoder/README.md) は100問を収録しています。整数・文字列処理、全探索、ソート、シミュレーション、DP、グリッド処理を使い、公式サンプル279件を `cargo test --locked --test atcoder` で検証します。
+
+[AOJの30問](examples/aoj/README.md) と [Library Checkerの7問](examples/library_checker/README.md) は、`online-judge-tools/verification-helper` で公開テストケースを取得して検証します。[導入と実行方法](docs/development/verification.md) を参照してください。
+
 ## 試す
 
 Rust stable と GCC/Clang の C++20 環境を使います。
@@ -23,6 +27,16 @@ printf '10 32\n' | /tmp/aplusb
 ```
 
 出力は `42` です。[導入手順](docs/getting-started/index.md) と [実装の構成・検証方法](docs/development/index.md) も参照してください。
+
+## テスト
+
+[依存ツールの導入](docs/development/verification.md) 後、共通コマンドでE2E、AtCoderサンプル、サニタイザー、AOJ・Library Checkerの公開テストをまとめて実行できます。CIも同じコマンドを使います。
+
+```bash
+python3 tools/test.py
+```
+
+手元の確認を短く済ませる場合は `--suite local`、公開テストだけなら `--suite public` を付けます。
 
 ## 設計ノート
 

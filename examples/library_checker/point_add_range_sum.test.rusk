@@ -1,0 +1,31 @@
+// verification-helper: PROBLEM https://judge.yosupo.jp/problem/point_add_range_sum
+// Point Add Range Sum
+// セグメント木
+in n,q:Int;
+in a(n):Vec<Int>;
+let size:=1;
+while size<n { size*=2; }
+let tree:=[0;2*size];
+for i in 0..n { tree[size+i]=a[i]; }
+let index:=size-1;
+while index>0 { tree[index]=tree[2*index]+tree[2*index+1]; index-=1; }
+for query in 0..q {
+    in kind,l,r:Int;
+    if kind==0 {
+        let position:=size+l;
+        tree[position]+=r;
+        while position>1 {
+            position/=2;
+            tree[position]=tree[2*position]+tree[2*position+1];
+        }
+    } else {
+        l+=size; r+=size;
+        let total:=0;
+        while l<r {
+            if l%2==1 { total+=tree[l]; l+=1; }
+            if r%2==1 { r-=1; total+=tree[r]; }
+            l/=2; r/=2;
+        }
+        wt total;
+    }
+}

@@ -1,0 +1,25 @@
+// verification-helper: PROBLEM https://judge.yosupo.jp/problem/unionfind
+// Unionfind
+// 経路圧縮とサイズによる併合
+fn leader(parents:Vec<Int>,vertex:Int)->Int {
+    let root:=copy(vertex);
+    while parents[root]>=0 { root=parents[root]; }
+    let current:=copy(vertex);
+    while current!=root {
+        let next:=copy(parents[current]);
+        parents[current]=root;
+        current:=next;
+    }
+    return root;
+}
+in n,q:Int;
+let parents:=[-1;n];
+for query in 0..q {
+    in kind,u,v:Int;
+    let a:=leader(parents,u); let b:=leader(parents,v);
+    if kind==0 {
+        if a==b { continue; }
+        if parents[a]>parents[b] { let held:=a; a:=b; b:=held; }
+        parents[a]+=parents[b]; parents[b]=a;
+    } else { wt Int(a==b); }
+}

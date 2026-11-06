@@ -15,12 +15,14 @@
 | `lib/collections.rusk` | 配列・イテレータ・文字の共有を管理するC++ランタイム |
 | `lib/vec.rusk` | コンパイラが要素型ごとに展開する配列操作のテンプレート |
 | `tests/e2e.rs` | Rusk → C++ → 実行結果までのテスト |
+| `tests/atcoder.rs` | AtCoderの解答例を公式サンプルと照合 |
+| `tests/support/mod.rs` | ソース変換・C++コンパイル・実行の共通テスト補助 |
 
 ```bash
-cargo fmt --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
+python3 tools/test.py
 ```
+
+全体の導入手順と対象の絞り方は [テストの実行](verification.md) を参照してください。`--suite local` で公開ジャッジ検証を除いた確認もできます。
 
 テストには `g++` が必要です。生成コードを最適化付きでコンパイルし、共有とコピー、評価順序、整数の境界値、診断などを確認します。
 
@@ -79,9 +81,12 @@ C++側では各Rusk関数に固有名を付け、全関数の前方宣言を出�
 
 `examples/prototype/` に配列合計、ソートと二分探索、グリッドBFS、再帰による剰余累乗を置いています。E2Eテストでは実行例に加え、探索とBFSを独立した実装の結果と比較します。
 
+`examples/atcoder/` にはAtCoderの解答100問と公式サンプル279件があります。`cargo test --locked --test atcoder` ですべて、末尾に `abc240_c` などの問題IDを付けるとその問題だけ検証できます。解答ごとに一度C++をコンパイルし、各サンプルの出力を空白区切りのトークンで照合します。サンプル一致は提出・ACの確認を意味しません。問題文は収録せず、出典リンクを解答と一覧に記しています。
+
+AOJの30問とLibrary Checkerの7問は、verification-helperで公開テストケースを取得して検証します。Ruskをカスタム言語として登録し、C++20への変換・コンパイルを接続しています。[テストの実行](verification.md) を参照してください。
+
 ```bash
-cargo build --locked
-python3 tools/check_sanitizers.py
+python3 tools/test.py --suite sanitizers
 python3 tools/benchmark.py --repeats 3 --output /tmp/rusk-benchmark.json
 ```
 
