@@ -18,4 +18,11 @@
 
 ## ドキュメントの方針
 
-利用者向けドキュメントは、他の人にも理解できる内容を目指し、実装済みの機能に合わせて整備します。MkDocs で構築し、GitHub Pages で公開する予定です。サイトの設定と公開はまだ行っていません。
+利用者向けドキュメントは、他の人にも理解できる内容を目指し、実装済みの機能に合わせて整備します。[docs/](docs/index.md) の Markdown を MkDocs Material で構築し、[GitHub Pages](https://shogo314.github.io/rusk_b_01/) で公開します。
+
+ローカルでのプレビューと公開の手順は、[ドキュメントの編集と公開](docs/development/documentation.md) を参照してください。
+
+```bash
+python -m pip install -r requirements-docs.txt
+python -m mkdocs serve
+```

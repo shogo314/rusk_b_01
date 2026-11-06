@@ -1,0 +1,22 @@
+site_name: Rusk β
+site_description: 競技プログラミング向け言語 Rusk β のドキュメント
+site_url: https://shogo314.github.io/rusk_b_01/
+repo_url: https://github.com/shogo314/rusk_b_01
+repo_name: shogo314/rusk_b_01
+edit_uri: edit/main/docs/
+strict: true
+theme:
+  name: material
+  language: ja
+nav:
+  - ホーム: index.md
+  - はじめに: getting-started/index.md
+  - 言語リファレンス: reference/index.md
+  - 標準ライブラリ: library/index.md
+  - 開発ガイド:
+      - 開発の進め方: development/index.md
+      - ドキュメントの編集と公開: development/documentation.md
+markdown_extensions:
+  - admonition
+  - fenced_code
+  - tables
